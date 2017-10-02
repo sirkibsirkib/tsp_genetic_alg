@@ -1,3 +1,7 @@
+
+use std::fmt;
+
+
 macro_rules! sqr {
     ($x:expr) => {{
         $x * $x
@@ -11,10 +15,11 @@ const CITY_NAMES : &'static [&'static str] =
     "Nijmegen", "Windhoek", "Monaco", "London", "Berlin", "Viersen", "Krefeld", "Venlo", "Hamburg",
     "Duesseldorf", "Shanghai", "Ottawa", "Dublin", "Dubai", "Houston", "Austin", "Venice",
     "Vienna", "Bethlehem", "Potsdam"];
+
 const NUM_CITIES : usize = 41;
 const NUM_THREADS : usize = 4;
-const POP_SIZE : usize = 20;
-const GENERATIONS : usize = 50;
+const POP_SIZE : usize = 30;
+const GENERATIONS : usize = 22;
 const ERAS : usize = 20;
 
 struct Point {
@@ -89,9 +94,29 @@ fn make_dmap(cities : &Vec<City>) -> DistMap {
     distances
 }
 
-#[derive(Debug)]
+#[derive(Copy)]
 struct Creature {
-    city_sequence : Vec<usize>,
+    city_sequence : [usize; NUM_CITIES],
+}
+
+impl fmt::Debug for Creature {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Creature [").is_ok();
+        for i in 0..NUM_CITIES {
+            write!(f, "{}, ", self.city_sequence[i]).is_ok();
+        }
+        write!(f, "]")
+    }
+}
+
+impl Clone for Creature {
+    fn clone(&self) -> Self{
+        let mut x = [0; NUM_CITIES];
+        for i in 0..NUM_CITIES{
+            x[i] = self.city_sequence[i];
+        }
+        Creature{city_sequence : x}
+    }
 }
 
 impl Creature {
@@ -109,15 +134,17 @@ impl Creature {
 
     fn breed_with<R : Rng>(&self, other : &Creature, r : &mut R) -> Creature {
         let offset = r.gen::<usize>() % NUM_CITIES;
-        let mut v = Vec::new();
+        let mut v = [0 ; NUM_CITIES];
         let copylen = self.city_sequence.len() / 2;
         for i in 0..copylen {
             let index = (i + offset) % NUM_CITIES;
-            v.push(self.city_sequence[index]);
+            v[i] = self.city_sequence[index];
         };
+        let mut v_len = copylen;
         for x in other.city_sequence.iter() {
             if ! v.contains(x) {
-                v.push(*x);
+                v[v_len] = *x;
+                v_len += 1;
             }
         }
         Creature {city_sequence : v}
@@ -136,72 +163,69 @@ impl Creature {
 }
 
 fn random_creature<R : Rng>(r : &mut R) -> Creature {
-    let mut v : Vec<usize> = Vec::new();
+    let mut v = [0 ; NUM_CITIES];
     for x in 0..NUM_CITIES {
-        v.push(x);
+        v[x] = x;
     }
     r.shuffle(&mut v);
     Creature {city_sequence : v}
 }
 
-fn child_rng<R : Rng>(proto_rng : &mut R) -> Isaac64Rng {
-    let mut seed : [u64; 10] = [0; 10];
-    for i in 0..10 {
-        seed[i] = proto_rng.gen();
-    };
-    Isaac64Rng::from_seed(&seed)
-}
-
 fn main() {
-    use std::io::Write;
-    use std::io::stdout;
     assert_eq!(CITY_NAMES.len(), NUM_CITIES);
     let mut rng = Isaac64Rng::from_seed(&[1,2,3,4,5,6,8]);
 
     let cities = make_cities(&CITY_NAMES);
     let distances = make_dmap(&cities);
-    let mut population = fresh_group(20, &mut rng);
 
     let mut populations : Vec<Vec<Creature>> = Vec::new();
     for _ in 0..NUM_THREADS {
         populations.push(fresh_group(POP_SIZE, &mut rng));
     }
 
+    for era in 0..ERAS {
+        let mut next_populations : Vec<Vec<Creature>>  = Vec::new();
+        cue::pipeline(
+            "idk",
+            NUM_THREADS,
+            populations.iter(),
+            |input| {
+                evolve(input, rng, &distances)
+            },
+            |output| {
+                next_populations.push(output)
+            },
+        );
 
-                //SEQUENTIAL
-                let mut pop = fresh_group(POP_SIZE, &mut rng);
-                for _ in 0..ERAS {
-                    pop = evolve(pop, &mut rng, &distances);
-                }
-                for b in pop.iter().take(1) {
-                    println!("{:?} :: {}", b, b.obj_func(&distances));
-                }
-                pop[0].print_route();
+        let mut next_gen : Vec<Creature> = Vec::new();
+        for p in next_populations {
+            for z in p {
+                next_gen.push(z);
+            }
+        }
+        sort_pop_objectively(&mut next_gen, &distances);
+        next_gen.dedup_by(
+            |a, b|
+            order_city_seqs(&a.city_sequence, &b.city_sequence) == Ordering::Equal
+        );
+        while next_gen.len() > POP_SIZE {
+            next_gen.pop();
+        }
+        while next_gen.len() < POP_SIZE {
+            next_gen.push(random_creature(&mut rng));
+        }
 
-
-    //PARALLEL
-
-    // for era in 0..30 {
-    //     use std::thread;
-    //
-    //     let mut next_populations : Vec<Vec<Creature>>  = Vec::new();
-    //
-    //     cue::pipeline(
-    //         "idk",
-    //         NUM_THREADS,
-    //         populations.into_iter(),
-    //         |input| {evolve(input, rng, &distances)},
-    //         |output| {next_populations.push(output)},
-    //     );
-    //
-    //     let next_gen : Vec<Creature>;
-    //     for p in populations{
-    //         for z in p {
-    //             next_gen.push(z);
-    //         }
-    //     }
-    //     sort_pop_objectively(&mut next_gen, &distances);
-    // }
+        println!("Best of Era {} : {:?} with {}", era, &next_gen[0], &next_gen[0].obj_func(&distances));
+        if era == ERAS-1 {
+            println!("\n\n");
+            next_gen[0].print_route();
+            break;
+        }
+        populations = Vec::new();
+        for _ in 0..NUM_THREADS {
+            populations.push(next_gen.to_vec());
+        }
+    }
 }
 
 fn breed_from_pop<R:Rng>(breeding_group : &[Creature], r : &mut R) -> Creature {
@@ -223,40 +247,55 @@ fn fresh_group<R : Rng>(pop_size : usize, r : &mut R) -> Vec<Creature> {
     population
 }
 
-fn evolve<R:Rng>(mut population : Vec<Creature>, r : &mut R, distances : &DistMap) -> Vec<Creature> {
+fn evolve<R:Rng>(start : &Vec<Creature>, mut r : R, distances : &DistMap) -> Vec<Creature> {
+    let mut population = Vec::new();
+    for z in start{
+        population.push(z.clone());
+    }
     let pop_size = population.len();
     let breed_group_size = pop_size/2;
     let mut offspring = Vec::new();
 
     // generations
     for _ in 0..GENERATIONS {
-        // print!("\n\nGEN {}\n", gen_id);
         sort_pop_objectively(&mut population, distances);
-        // for p in population.iter().take(1) {
-        //     println!("{:?} == {}", p, p.obj_func(&distances));
-        // }
         while population.len() > breed_group_size {
             population.pop();
         }
         while population.len() + offspring.len() < pop_size {
             offspring.push(
-                breed_from_pop(& population[..breed_group_size], r)
+                breed_from_pop(& population[..breed_group_size], &mut r)
             );
         }
         while let Some(mut o) = offspring.pop(){
-            o.mutate(r);
+            o.mutate(&mut r);
             population.push(o);
         }
-        // population.push(random_creature(r));
     }
     population
 }
+use std::cmp::Ordering;
 
 fn sort_pop_objectively(population : &mut Vec<Creature>, distances : &DistMap){
     population.sort_by(
-        |c1 : &Creature, c2 : &Creature|
-        c1.obj_func(&distances)
-            .partial_cmp(&c2.obj_func(&distances))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    );
+        |c1 : &Creature, c2 : &Creature|{
+            if let Some(ord) = c1.obj_func(&distances)
+                .partial_cmp(&c2.obj_func(&distances)){
+                    if ord == Ordering::Equal {c1.city_sequence.cmp(& c2.city_sequence)} else {ord}
+                }
+            else{
+                order_city_seqs(&c1.city_sequence, &c2.city_sequence)
+            }
+        }
+    )
+}
+
+fn order_city_seqs(a : &[usize ; NUM_CITIES], b : &[usize ; NUM_CITIES]) -> Ordering {
+    for i in 0..NUM_CITIES {
+        match a[i].cmp(&b[i]) {
+            Ordering::Equal => (),
+            x => return x,
+        }
+    };
+    Ordering::Equal
 }
