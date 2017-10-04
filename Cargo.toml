@@ -1,9 +1,11 @@
 [package]
-name = "evolution"
+name = "tsp_genetic_alg"
 version = "0.1.0"
 authors = ["sirkibsirkib <christopher.esterhuyse@gmail.com>"]
 
 [dependencies]
+clap = "2.26.2"
 rand = "0.3"
 cue = "0.1.0"
 bidir-map = "0.6.0"
+num_cpus = "1.4.0"

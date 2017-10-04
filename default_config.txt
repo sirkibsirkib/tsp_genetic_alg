@@ -1,0 +1,5 @@
+eras : 20
+generations : 200
+population : 60
+worker_threads : 3
+in_path : ./input/input.txt

@@ -5,9 +5,8 @@ use std::fs::File;
 use std::iter::FromIterator;
 use std::str::FromStr;
 use std;
-use std::io::{Error, ErrorKind};
+use std::io::{Error};
 use bidir_map::BidirMap;
-
 
 
 #[derive(PartialEq)]
@@ -19,7 +18,7 @@ pub type CityMap = BidirMap<u32, String>;
 pub type PointMap = HashMap<u32, Point>;
 pub type DistMap = HashMap<(u32, u32), f32>;
 
-pub fn read_point_map(path : &str) -> Result<(CityMap, PointMap), std::io::Error> {
+pub fn read_point_map(path : &str) -> Result<(CityMap, PointMap), Error> {
     /*
     format:
     doc = [line]*
@@ -81,7 +80,7 @@ pub fn write_dist_map(city_map : &CityMap, dist_map : &DistMap, path : &str) -> 
     use std::fs::File;
     use std::io::Write;
 
-    let mut f = File::create(path)?;
+    let f = File::create(path)?;
     let mut writer = BufWriter::new(&f);
 
     for cid_1 in city_map.first_col(){
@@ -92,7 +91,7 @@ pub fn write_dist_map(city_map : &CityMap, dist_map : &DistMap, path : &str) -> 
                 city_map.get_by_first(cid_1).unwrap(),
                 city_map.get_by_first(cid_2).unwrap(),
                 dist_map.get(&(*cid_1, *cid_2)).unwrap(),
-            );
+            ).is_ok();
         }
     }
     Ok(())
@@ -109,11 +108,14 @@ pub fn read_dist_map(path : &str) -> Result<(CityMap, DistMap), std::io::Error> 
     let mut dist_map : DistMap = HashMap::new();
     let mut next_id : u32 = 0;
 
+    let mut warnings = 0;
+
     let f = File::open(path)?;
     let file = BufReader::new(&f);
     for line in file.lines() {
         let l = line.unwrap();
         let res = Vec::from_iter(l.split("|").map(|x| String::from(x).trim().to_owned()));
+        println!("{:?}", &res);
         if res.len() != 3 {
             return Err(Error::new(std::io::ErrorKind::InvalidData, "Line has wrong number of fields"));
         }
@@ -125,6 +127,18 @@ pub fn read_dist_map(path : &str) -> Result<(CityMap, DistMap), std::io::Error> 
             next_id += 1;
             next_id - 1
         };
+
+        if warnings < 3 {
+            if let Ok(x) = res[1].parse::<f32>() {
+                return Err(Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("City named `{}`? did you intend to use COORD mode?", x)));
+            }
+            warnings += 1;
+            if warnings == 3 {
+                println!("Warnings suppressed...");
+            }
+        }
 
         let c2_id : u32 = if city_map.contains_second_key(&res[1]){
             * city_map.get_by_second(&res[1]).unwrap()
