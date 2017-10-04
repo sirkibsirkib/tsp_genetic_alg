@@ -1,0 +1,3 @@
+Amsterdam 	| Arnhem 	|2.0
+Arnhem		|Nijmegen	|15.0
+Nijmegen	|Amsterdam	|10.0

@@ -6,3 +6,4 @@ authors = ["sirkibsirkib <christopher.esterhuyse@gmail.com>"]
 [dependencies]
 rand = "0.3"
 cue = "0.1.0"
+bidir-map = "0.6.0"

@@ -1,62 +1,66 @@
 
 use std::fmt;
 
+mod tsp;
 
-macro_rules! sqr {
-    ($x:expr) => {{
-        $x * $x
-    }}
-}
-
-const CITY_NAMES : &'static [&'static str] =
-    &["Amsterdam", "Vlissingen", "Cologne", "Copenhagen", "Duivendrecht", "Gulpen", "Wageningen",
-    "Bethlehem", "Munich", "Loewen", "Maastricht", "Bloemfontein", "Stellenbosch", "Amstelveen",
-    "Maasdoorn", "Zwolle", "Leeuwaarden", "Arnhem", "Boisheim", "Kaldenkirchen", "Celle",
-    "Nijmegen", "Windhoek", "Monaco", "London", "Berlin", "Viersen", "Krefeld", "Venlo", "Hamburg",
-    "Duesseldorf", "Shanghai", "Ottawa", "Dublin", "Dubai", "Houston", "Austin", "Venice",
-    "Vienna", "Bethlehem", "Potsdam"];
-
-const NUM_CITIES : usize = 41;
-const NUM_THREADS : usize = 4;
-const POP_SIZE : usize = 30;
-const GENERATIONS : usize = 22;
-const ERAS : usize = 20;
-
-struct Point {
-    x : f32,
-    y : f32,
-}
-impl Point {
-    fn distance_to(&self, other : &Point) -> f32 {
-        return (sqr!(self.x - other.x) + sqr!(self.y - other.y)).sqrt();
-    }
-}
-
-struct City{
-    id : usize,
-    name : String,
-    p : Point,
-}
-
-impl PartialEq for City {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-    }
-}
-use std::hash::{Hash, Hasher};
-impl Eq for City {}
-impl Hash for City {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-    }
-}
 extern crate cue;
 extern crate rand;
+extern crate bidir_map;
 
+use std::hash::{Hash, Hasher};
 use std::collections::HashMap;
 use rand::{SeedableRng, Rng, Isaac64Rng};
 
-type DistMap = HashMap<(usize, usize), f32>;
+use tsp::{CityMap, PointMap, DistMap};
+
+// type DistMap = HashMap<(usize, usize), f32>;
+
+// const CITY_NAMES : &'static [&'static str] =
+//     &["Amsterdam", "Vlissingen", "Cologne", "Copenhagen", "Duivendrecht", "Gulpen", "Wageningen",
+//     "Bethlehem", "Munich", "Loewen", "Maastricht", "Bloemfontein", "Stellenbosch", "Amstelveen",
+//     "Maasdoorn", "Zwolle", "Leeuwaarden", "Arnhem", "Boisheim", "Kaldenkirchen", "Celle",
+//     "Nijmegen", "Windhoek", "Monaco", "London", "Berlin", "Viersen", "Krefeld", "Venlo", "Hamburg",
+//     "Duesseldorf", "Shanghai", "Ottawa", "Dublin", "Dubai", "Houston", "Austin", "Venice",
+//     "Vienna", "Bethlehem", "Potsdam", "Blerick", "Warsaw", "Frankfurt", "Braunschweig", "Essen",
+//     "Hannover", "Prague", "Moscow", "Pietersburg", "Knysna", "Pyongyang", "Seoul", "Beijing",
+//     "Paris", "Nice", "Helsinki", "Mannheim", "Durban", "Cairo", "Leipzig", "Wickrath",
+//     "Cuijk", "Essex", "Manchester", "Liverpool", "Salzburg", "Cullinan"];
+//
+// const NUM_CITIES : usize = 68;
+const NUM_THREADS : usize = 4;
+const POP_SIZE : usize = 100;
+const GENERATIONS : usize = 2500;
+const ERAS : usize = 100;
+
+// struct Point {
+//     x : f32,
+//     y : f32,
+// }
+//
+// impl Point {
+//     fn distance_to(&self, other : &Point) -> f32 {
+//         return (sqr!(self.x - other.x) + sqr!(self.y - other.y)).sqrt();
+//     }
+// }
+//
+// struct City{
+//     id : usize,
+//     name : String,
+//     p : Point,
+// }
+//
+// impl PartialEq for City {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.name == other.name
+//     }
+// }
+//
+// impl Eq for City {}
+// impl Hash for City {
+//     fn hash<H: Hasher>(&self, state: &mut H) {
+//         self.name.hash(state);
+//     }
+// }
 
 
 fn distance_between(dmap : &DistMap, cid1 : usize, cid2 : usize) -> f32 {
@@ -120,6 +124,15 @@ impl Clone for Creature {
 }
 
 impl Creature {
+    fn new_random<R : Rng>(r : &mut R) -> Creature {
+        let mut v = [0 ; NUM_CITIES];
+        for x in 0..NUM_CITIES {
+            v[x] = x;
+        }
+        r.shuffle(&mut v);
+        Creature {city_sequence : v}
+    }
+
     fn print_route (&self) {
         for &cid in self.city_sequence.iter() {
             print!("{:?} --> ", CITY_NAMES[cid]);
@@ -135,7 +148,7 @@ impl Creature {
     fn breed_with<R : Rng>(&self, other : &Creature, r : &mut R) -> Creature {
         let offset = r.gen::<usize>() % NUM_CITIES;
         let mut v = [0 ; NUM_CITIES];
-        let copylen = self.city_sequence.len() / 2;
+        let copylen = (NUM_CITIES as f32 * r.gen::<f32>()) as usize;
         for i in 0..copylen {
             let index = (i + offset) % NUM_CITIES;
             v[i] = self.city_sequence[index];
@@ -162,21 +175,21 @@ impl Creature {
     }
 }
 
-fn random_creature<R : Rng>(r : &mut R) -> Creature {
-    let mut v = [0 ; NUM_CITIES];
-    for x in 0..NUM_CITIES {
-        v[x] = x;
-    }
-    r.shuffle(&mut v);
-    Creature {city_sequence : v}
-}
+
 
 fn main() {
+    let (cities, points) = tsp::read_point_map("./tsp_points").unwrap();
+    let distances = tsp::point_map_to_dist_map(&cities, &points);
+    tsp::write_dist_map(&cities, &distances, "./out.txt").unwrap();
+    tsp::read_dist_map("./out.txt");
+
+    std::process::exit(0);
+
     assert_eq!(CITY_NAMES.len(), NUM_CITIES);
     let mut rng = Isaac64Rng::from_seed(&[1,2,3,4,5,6,8]);
 
-    let cities = make_cities(&CITY_NAMES);
-    let distances = make_dmap(&cities);
+    // let cities = make_cities(&CITY_NAMES);
+    // let distances = make_dmap(&cities);
 
     let mut populations : Vec<Vec<Creature>> = Vec::new();
     for _ in 0..NUM_THREADS {
@@ -212,10 +225,10 @@ fn main() {
             next_gen.pop();
         }
         while next_gen.len() < POP_SIZE {
-            next_gen.push(random_creature(&mut rng));
+            next_gen.push(Creature::new_random(&mut rng));
         }
 
-        println!("Best of Era {} : {:?} with {}", era, &next_gen[0], &next_gen[0].obj_func(&distances));
+        println!("Best of Era {} has {}", era, &next_gen[0].obj_func(&distances));
         if era == ERAS-1 {
             println!("\n\n");
             next_gen[0].print_route();
@@ -242,7 +255,7 @@ fn breed_from_pop<R:Rng>(breeding_group : &[Creature], r : &mut R) -> Creature {
 fn fresh_group<R : Rng>(pop_size : usize, r : &mut R) -> Vec<Creature> {
     let mut population : Vec<Creature> = Vec::new();
     for _ in 0..pop_size {
-        population.push(random_creature(r));
+        population.push(Creature::new_random(r));
     }
     population
 }
@@ -268,7 +281,9 @@ fn evolve<R:Rng>(start : &Vec<Creature>, mut r : R, distances : &DistMap) -> Vec
             );
         }
         while let Some(mut o) = offspring.pop(){
-            o.mutate(&mut r);
+            if !r.gen_weighted_bool(3) {
+                o.mutate(&mut r);
+            }
             population.push(o);
         }
     }

@@ -1,0 +1,4 @@
+read cities from input file
+  How to generate distances?
+
+split program into many files, tidy it up
